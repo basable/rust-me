@@ -1,0 +1,94 @@
+apiVersion: basable.com/v1
+kind: ProjectPlan
+project:
+  language: rust
+  frontend: static
+  auth: kratos
+  database: { instances: 1 }
+nanoservices:
+  - name: site
+    description: Owns websites, their members and navigation, and the theme catalog.
+    owns:
+      tables:
+        - name: site
+          columns:
+            - { name: id, type: uuid, primaryKey: true }
+            - { name: slug, type: string, unique: true }
+            - { name: name, type: string }
+            - { name: theme_name, type: string }
+            - { name: created_at, type: timestamp }
+        - name: site_member
+          columns:
+            - { name: id, type: uuid, primaryKey: true }
+            - { name: site_id, type: uuid }
+            - { name: identity_id, type: uuid }
+            - { name: role, type: string }
+          indexes: [ { columns: [site_id, identity_id] }, { columns: [identity_id] } ]
+        - name: nav_item
+          columns:
+            - { name: id, type: uuid, primaryKey: true }
+            - { name: site_id, type: uuid }
+            - { name: label, type: string }
+            - { name: page_slug, type: string }
+            - { name: position, type: int32 }
+          indexes: [ { columns: [site_id, position] } ]
+      configTypes:
+        - name: theme
+          prefix: thm
+          fields:
+            - { name: layout_html, type: string }
+            - { name: css, type: string }
+    handles:
+      - { message: CreateSiteRequest, response: Site }
+      - { message: GetSiteRequest, response: Site }
+      - { message: ListSitesRequest, response: SiteList }
+      - { message: SaveNavigationRequest, response: Navigation }
+      - { message: AuthorizeSiteAccessRequest, response: SiteAccess }
+    api:
+      service: SiteService
+      methods:
+        - { name: CreateSite, request: CreateSiteRequest, response: CreateSiteResponse }
+        - { name: GetSite, request: GetSiteRequest, response: GetSiteResponse }
+        - { name: ListSites, request: ListSitesRequest, response: ListSitesResponse }
+        - { name: SaveNavigation, request: SaveNavigationRequest, response: SaveNavigationResponse }
+
+  - name: content
+    description: Owns pages, their revisions and which revision is published.
+    owns:
+      tables:
+        - name: page
+          columns:
+            - { name: id, type: uuid, primaryKey: true }
+            - { name: site_id, type: uuid }
+            - { name: slug, type: string }
+            - { name: title, type: string }
+            - { name: created_at, type: timestamp }
+            - { name: updated_at, type: timestamp }
+          indexes: [ { columns: [site_id, slug] } ]
+        - name: page_revision
+          columns:
+            - { name: id, type: uuid, primaryKey: true }
+            - { name: page_id, type: uuid }
+            - { name: body, type: json }
+            - { name: author_id, type: uuid }
+            - { name: created_at, type: timestamp }
+          indexes: [ { columns: [page_id, created_at] } ]
+        - name: published_page
+          columns:
+            - { name: page_id, type: uuid, primaryKey: true }
+            - { name: revision_id, type: uuid }
+            - { name: published_at, type: timestamp }
+    handles:
+      - { message: SavePageRequest, response: Page }
+      - { message: GetPageRequest, response: Page }
+      - { message: ListPagesRequest, response: PageList }
+      - { message: PublishPageRequest, response: Page }
+    sends:
+      - { message: AuthorizeSiteAccessRequest, response: SiteAccess }
+    api:
+      service: ContentService
+      methods:
+        - { name: SavePage, request: SavePageRequest, response: SavePageResponse }
+        - { name: GetPage, request: GetPageRequest, response: GetPageResponse }
+        - { name: ListPages, request: ListPagesRequest, response: ListPagesResponse }
+        - { name: PublishPage, request: PublishPageRequest, response: PublishPageResponse }
