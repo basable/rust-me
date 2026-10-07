@@ -1,31 +1,31 @@
-# 01 — Architecture: simple-cms
+# 01 \u2014 Architecture: simple-cms
 
-Four nanoservices in one Rust binary. Two lifecycles pass the Directive §1 question ("waiting, polling a third party until it finishes, scheduled work, driving another system to match"):
+Four nanoservices in one Rust binary. Two lifecycles pass the Directive \u00a71 question ("waiting, polling a third party until it finishes, scheduled work, driving another system to match"):
 
-- a **scheduled publication** waits until its time, then drives a page's live pointer → `content.publication`;
-- a **custom domain** polls DNS until its TXT record appears and keeps re-checking it → `site.domain`.
+- a **scheduled publication** waits until its time, then drives a page's live pointer \u2192 `content.publication`;
+- a **custom domain** polls DNS until its TXT record appears and keeps re-checking it \u2192 `site.domain`.
 
-Everything else (saving, publishing now, membership, navigation, form submissions, rendering) is a single transaction or a pure read, so it is plain tables or no state at all.
+Everything else (saving, moving, publishing now, membership, navigation, form submissions, rendering) is a single transaction or a pure read, so it is plain tables or no state at all.
 
 ## site
 
-Owns what a website *is*, who may touch it, and where it is served. **Plain tables** (Directive §2): `site`, `site_member` (Kratos identity → `owner` | `editor`), `nav_item` (ordered menu). **Processing-object type** `domain` (prefix `dom`): one hostname attached to one site; it needs a type because verification *waits on a third party* (the owner's DNS) for minutes to days, must be re-checked periodically, and must survive restarts and replicas (Directive §3, §5). **Config catalog** `theme`. **No external effects**: the Kratos admin lookup (add member by email) and DNS TXT lookups are reads (Directive §6). Handles the site / member / nav / domain API requests plus two internal requests: `AuthorizeSiteAccessRequest → SiteAccess` (from `content` and `forms`) and `ResolvePublicSiteRequest → PublicSite` (from `delivery` and `forms`: by host, by slug or by id → the site, its effective theme, its menu; derived state only, Directive §7). API: `SiteService`.
+Owns what a website *is*, who may touch it, and where it is served. **Plain tables** (Directive \u00a72): `site`, `site_member` (Kratos identity \u2192 `owner` | `editor`), `nav_item` (ordered menu, linking pages by *path*). **Processing-object type** `domain` (prefix `dom`): one hostname attached to one site; it needs a type because verification *waits on a third party* (the owner's DNS) for minutes to days, must be re-checked periodically, and must survive restarts and replicas (Directive \u00a73, \u00a75). **Config catalog** `theme`. **No external effects**: the Kratos admin lookup (add member by email) and DNS TXT lookups are reads (Directive \u00a76). Handles the site / member / nav / domain API requests plus two internal requests: `AuthorizeSiteAccessRequest \u2192 SiteAccess` (from `content` and `forms`) and `ResolvePublicSiteRequest \u2192 PublicSite` (from `delivery` and `forms`: by host, slug or id \u2192 the site, its effective theme, its menu; derived state only, Directive \u00a77). API: `SiteService`.
 
 ## content
 
-Owns pages, posts and what is live. **Plain tables**: `page` (kind `page` | `post`), `page_revision` (append-only: title, blocks, SEO fields, post date, tags), `published_page` (the live pointer). **Processing-object type** `publication` (prefix `pub`): one scheduled publish or unpublish; it waits (possibly days), can be rescheduled or cancelled, and must fire once on whichever replica claims it (Directive §3, §5). Sends `AuthorizeSiteAccessRequest` to `site` before every editor request (request path, outside any transaction, §3.7). Handles the page API plus three read requests from `delivery`: `GetPublishedPageRequest → PublishedPage`, `ListPublishedPagesRequest → PublishedPageIndex` (posts list, tag pages, sitemap) and `GetPreviewPageRequest → PublishedPage` (any revision, authorized). API: `ContentService`.
+Owns pages, posts and what is live. **Plain tables**: `page` (kind `page` | `post`, `parent_id`, materialised `path` unique per site), `page_revision` (append-only: title, blocks, SEO fields, post date, tags), `published_page` (the live pointer). **Processing-object type** `publication` (prefix `pub`): one scheduled publish or unpublish; it waits (possibly days), can be rescheduled or cancelled, and must fire once on whichever replica claims it (Directive \u00a73, \u00a75). Sends `AuthorizeSiteAccessRequest` to `site` before every editor request (request path, outside any transaction, \u00a73.7). Handles the page API (incl. `MovePageRequest`) plus three read requests from `delivery`: `GetPublishedPageRequest \u2192 PublishedPage` (by path), `ListPublishedPagesRequest \u2192 PublishedPageIndex` (posts list, tag pages, sitemap) and `GetPreviewPageRequest \u2192 PublishedPage`. API: `ContentService`.
 
 ## forms
 
-Owns what visitors send. **Plain tables**: `form_submission`, `form_rate_limit`. **Schedule** `purge_rate_limits` (hourly ticker) deletes expired rate-limit windows. No lifecycle (a submission is stored in one transaction; nothing waits). No external effects yet — the email alert is `later` and will be a `keyed_replay` adapter here. Handles `SubmitContactFormRequest → FormSubmissionReceipt` from the public POST route, and the editor inbox API. Sends `ResolvePublicSiteRequest` (host/slug → site id) and `AuthorizeSiteAccessRequest` to `site`. API: `FormsService`.
+Owns what visitors send. **Plain tables**: `form_submission`, `form_rate_limit`. **Schedule** `purge_rate_limits` (hourly ticker). No lifecycle (a submission is stored in one transaction). No external effects yet \u2014 the email alert is `later` and will be a `keyed_replay` adapter here. Handles `SubmitContactFormRequest \u2192 FormSubmissionReceipt` from the public POST route, and the editor inbox API. Sends `ResolvePublicSiteRequest` and `AuthorizeSiteAccessRequest` to `site`. API: `FormsService`.
 
 ## delivery
 
-Renders the public website. **Owns nothing** — no tables, no types, no effects, so no schema and no pool (Directive §9). Handles `RenderPathRequest → RenderedDocument` ({host, path} → status, content type, body: page, `/blog`, `/blog/tag/{tag}`, `/sitemap.xml`, `/robots.txt`, 404) and `PreviewPageRequest → RenderedDocument` (editor preview). Sends `ResolvePublicSiteRequest` to `site`, and `GetPublishedPageRequest`, `ListPublishedPagesRequest`, `GetPreviewPageRequest` to `content`. Visitors reach it through raw routes on the api crate (one messenger send each); editors through `PublicService`. No render cache in v1 (in-memory state, §9).
+Renders the public website. **Owns nothing** \u2014 no tables, no types, no effects, so no schema and no pool (Directive \u00a79). Handles `RenderPathRequest \u2192 RenderedDocument` ({host, path} \u2192 page by full path, `/blog`, `/blog/tag/{tag}`, `/sitemap.xml`, `/robots.txt`, 404) and `PreviewPageRequest \u2192 RenderedDocument`. Sends `ResolvePublicSiteRequest` to `site`, and `GetPublishedPageRequest`, `ListPublishedPagesRequest`, `GetPreviewPageRequest` to `content`. Visitors reach it through raw routes on the api crate (one messenger send each); editors through `PublicService`. No render cache in v1 (\u00a79).
 
 ## Deployment shape
 
-One binary (`basable-app`) with all four nanoservices; one CloudNativePG cluster (`instances: 1`) with schemas `site`, `content` and `forms` plus a `kratos` database; Kratos for editor identity; a **static** admin frontend (plain HTML/CSS/JS on nginx-unprivileged — the block editor is an ordered form of blocks with a preview iframe, not an editor-like surface that justifies React). Routing on the platform host: `/api/*` and `/s/*` → binary, `/.ory/*` → Kratos, `/*` → nginx; on a verified custom domain every path → binary (platform dependency). App replicas: 1 on the free tier. Details in `05-deployment.md`.
+One binary (`basable-app`) with all four nanoservices; one CloudNativePG cluster (`instances: 1`) with schemas `site`, `content` and `forms` plus a `kratos` database; Kratos for editor identity; a **static** admin frontend (plain HTML/CSS/JS on nginx-unprivileged \u2014 the block editor is an ordered form of blocks with a preview iframe and a page tree, not an editor-like surface that justifies React). Routing on the platform host: `/api/*` and `/s/*` \u2192 binary, `/.ory/*` \u2192 Kratos, `/*` \u2192 nginx; on a verified custom domain every path \u2192 binary (platform dependency). App replicas: 1 on the free tier. Details in `05-deployment.md`.
 
 ## Topology
 
@@ -47,6 +47,7 @@ One binary (`basable-app`) with all four nanoservices; one CloudNativePG cluster
 | ResolvePublicSiteRequest | delivery, forms | site | PublicSite (1:1) |
 | CreatePageRequest | api | content | Page (1:1) |
 | SavePageRequest | api | content | Page (1:1) |
+| MovePageRequest | api | content | Page (1:1) |
 | GetPageRequest | api | content | Page (1:1) |
 | ListPagesRequest | api | content | PageList (1:1) |
 | ListRevisionsRequest | api | content | RevisionList (1:1) |
@@ -66,4 +67,4 @@ One binary (`basable-app`) with all four nanoservices; one CloudNativePG cluster
 | RenderPathRequest | api (raw route + Connect) | delivery | RenderedDocument (1:1) |
 | PreviewPageRequest | api | delivery | RenderedDocument (1:1) |
 
-No events and no fan-out: nothing downstream must happen when a page is published or a form is submitted (delivery reads on demand; the email alert, when added, lives inside `forms`).
+No events and no fan-out: nothing downstream must happen when a page is published, moved or a form is submitted (delivery reads on demand; a moved page's nav links are the owner's to fix \u2014 the admin flags nav items whose path no longer resolves).

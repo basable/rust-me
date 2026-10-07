@@ -43,7 +43,7 @@ nanoservices:
             - { name: id, type: uuid, primaryKey: true }
             - { name: site_id, type: uuid }
             - { name: label, type: string }
-            - { name: page_slug, type: string }
+            - { name: page_path, type: string }
             - { name: position, type: int32 }
           indexes: [ { columns: [site_id, position] } ]
       configTypes:
@@ -84,7 +84,7 @@ nanoservices:
         - { name: VerifyDomain, request: VerifyDomainRequest, response: VerifyDomainResponse }
 
   - name: content
-    description: Owns pages and posts, their revisions, the live pointer, and scheduled publications.
+    description: Owns pages and posts, the page tree, revisions, the live pointer, and scheduled publications.
     owns:
       processingObjects:
         - name: publication
@@ -103,10 +103,13 @@ nanoservices:
             - { name: id, type: uuid, primaryKey: true }
             - { name: site_id, type: uuid }
             - { name: kind, type: string }
+            - { name: parent_id, type: uuid, nullable: true }
             - { name: slug, type: string }
+            - { name: path, type: string }
+            - { name: depth, type: int32 }
             - { name: created_at, type: timestamp }
             - { name: updated_at, type: timestamp }
-          indexes: [ { columns: [site_id, slug] }, { columns: [site_id, kind] } ]
+          indexes: [ { columns: [site_id, path] }, { columns: [site_id, kind] }, { columns: [parent_id] } ]
         - name: page_revision
           columns:
             - { name: id, type: uuid, primaryKey: true }
@@ -130,6 +133,7 @@ nanoservices:
     handles:
       - { message: CreatePageRequest, response: Page }
       - { message: SavePageRequest, response: Page }
+      - { message: MovePageRequest, response: Page }
       - { message: GetPageRequest, response: Page }
       - { message: ListPagesRequest, response: PageList }
       - { message: ListRevisionsRequest, response: RevisionList }
@@ -149,6 +153,7 @@ nanoservices:
       methods:
         - { name: CreatePage, request: CreatePageRequest, response: CreatePageResponse }
         - { name: SavePage, request: SavePageRequest, response: SavePageResponse }
+        - { name: MovePage, request: MovePageRequest, response: MovePageResponse }
         - { name: GetPage, request: GetPageRequest, response: GetPageResponse }
         - { name: ListPages, request: ListPagesRequest, response: ListPagesResponse }
         - { name: ListRevisions, request: ListRevisionsRequest, response: ListRevisionsResponse }
@@ -167,7 +172,7 @@ nanoservices:
           columns:
             - { name: id, type: uuid, primaryKey: true }
             - { name: site_id, type: uuid }
-            - { name: page_slug, type: string }
+            - { name: page_path, type: string }
             - { name: name, type: string }
             - { name: email, type: string }
             - { name: message, type: string }
