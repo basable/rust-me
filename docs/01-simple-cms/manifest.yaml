@@ -7,7 +7,7 @@ project:
   database: { instances: 1 }
 nanoservices:
   - name: site
-    description: Owns websites, their members and navigation, and the theme catalog.
+    description: Owns websites, their members and roles, navigation, and the theme catalog.
     owns:
       tables:
         - name: site
@@ -23,6 +23,7 @@ nanoservices:
             - { name: site_id, type: uuid }
             - { name: identity_id, type: uuid }
             - { name: role, type: string }
+            - { name: created_at, type: timestamp }
           indexes: [ { columns: [site_id, identity_id] }, { columns: [identity_id] } ]
         - name: nav_item
           columns:
@@ -40,21 +41,41 @@ nanoservices:
             - { name: css, type: string }
     handles:
       - { message: CreateSiteRequest, response: Site }
+      - { message: UpdateSiteRequest, response: Site }
       - { message: GetSiteRequest, response: Site }
       - { message: ListSitesRequest, response: SiteList }
+      - { message: AddSiteMemberRequest, response: SiteMember }
+      - { message: RemoveSiteMemberRequest, response: SiteMember }
+      - { message: ListSiteMembersRequest, response: SiteMemberList }
       - { message: SaveNavigationRequest, response: Navigation }
       - { message: AuthorizeSiteAccessRequest, response: SiteAccess }
+      - { message: ResolvePublicSiteRequest, response: PublicSite }
     api:
       service: SiteService
       methods:
         - { name: CreateSite, request: CreateSiteRequest, response: CreateSiteResponse }
+        - { name: UpdateSite, request: UpdateSiteRequest, response: UpdateSiteResponse }
         - { name: GetSite, request: GetSiteRequest, response: GetSiteResponse }
         - { name: ListSites, request: ListSitesRequest, response: ListSitesResponse }
+        - { name: AddSiteMember, request: AddSiteMemberRequest, response: AddSiteMemberResponse }
+        - { name: RemoveSiteMember, request: RemoveSiteMemberRequest, response: RemoveSiteMemberResponse }
+        - { name: ListSiteMembers, request: ListSiteMembersRequest, response: ListSiteMembersResponse }
         - { name: SaveNavigation, request: SaveNavigationRequest, response: SaveNavigationResponse }
 
   - name: content
-    description: Owns pages, their revisions and which revision is published.
+    description: Owns pages, revisions, the live pointer, and scheduled publications.
     owns:
+      processingObjects:
+        - name: publication
+          prefix: pub
+          spec:
+            - { name: page_id, type: uuid, immutable: true }
+            - { name: action, type: string, immutable: true }
+            - { name: revision_id, type: uuid, immutable: true, nullable: true }
+            - { name: publish_at, type: timestamp }
+          status:
+            - { name: phase, type: string }
+            - { name: applied_at, type: timestamp, nullable: true }
       tables:
         - name: page
           columns:
@@ -69,6 +90,7 @@ nanoservices:
           columns:
             - { name: id, type: uuid, primaryKey: true }
             - { name: page_id, type: uuid }
+            - { name: title, type: string }
             - { name: body, type: json }
             - { name: author_id, type: uuid }
             - { name: created_at, type: timestamp }
@@ -76,19 +98,47 @@ nanoservices:
         - name: published_page
           columns:
             - { name: page_id, type: uuid, primaryKey: true }
-            - { name: revision_id, type: uuid }
-            - { name: published_at, type: timestamp }
+            - { name: revision_id, type: uuid, nullable: true }
+            - { name: set_at, type: timestamp }
+            - { name: set_by_publication_id, type: uuid, nullable: true }
     handles:
+      - { message: CreatePageRequest, response: Page }
       - { message: SavePageRequest, response: Page }
       - { message: GetPageRequest, response: Page }
       - { message: ListPagesRequest, response: PageList }
+      - { message: ListRevisionsRequest, response: RevisionList }
       - { message: PublishPageRequest, response: Page }
+      - { message: UnpublishPageRequest, response: Page }
+      - { message: SchedulePublicationRequest, response: Publication }
+      - { message: ReschedulePublicationRequest, response: Publication }
+      - { message: CancelPublicationRequest, response: Publication }
+      - { message: ListPublicationsRequest, response: PublicationList }
+      - { message: GetPublishedPageRequest, response: PublishedPage }
     sends:
       - { message: AuthorizeSiteAccessRequest, response: SiteAccess }
     api:
       service: ContentService
       methods:
+        - { name: CreatePage, request: CreatePageRequest, response: CreatePageResponse }
         - { name: SavePage, request: SavePageRequest, response: SavePageResponse }
         - { name: GetPage, request: GetPageRequest, response: GetPageResponse }
         - { name: ListPages, request: ListPagesRequest, response: ListPagesResponse }
+        - { name: ListRevisions, request: ListRevisionsRequest, response: ListRevisionsResponse }
         - { name: PublishPage, request: PublishPageRequest, response: PublishPageResponse }
+        - { name: UnpublishPage, request: UnpublishPageRequest, response: UnpublishPageResponse }
+        - { name: SchedulePublication, request: SchedulePublicationRequest, response: SchedulePublicationResponse }
+        - { name: ReschedulePublication, request: ReschedulePublicationRequest, response: ReschedulePublicationResponse }
+        - { name: CancelPublication, request: CancelPublicationRequest, response: CancelPublicationResponse }
+        - { name: ListPublications, request: ListPublicationsRequest, response: ListPublicationsResponse }
+
+  - name: delivery
+    description: Renders published pages of a site to public HTML with its theme; owns no state.
+    handles:
+      - { message: RenderPageRequest, response: RenderedPage }
+    sends:
+      - { message: ResolvePublicSiteRequest, response: PublicSite }
+      - { message: GetPublishedPageRequest, response: PublishedPage }
+    api:
+      service: PublicService
+      methods:
+        - { name: RenderPage, request: RenderPageRequest, response: RenderPageResponse }
