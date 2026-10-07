@@ -1,4 +1,4 @@
-# 02 \u2014 Nanoservice: forms
+# 02 — Nanoservice: forms
 
 Owns what visitors send through contact forms. Plain executor: no processing-object type (a submission is stored in one transaction; nothing waits or converges), two plain tables, one schedule, no external effects yet.
 
@@ -8,9 +8,9 @@ An editor adds a `contact_form` block to a page (`content` stores it like any bl
 
 ## Public route
 
-A raw axum route on the api crate: `POST /_contact` on a custom domain and `POST /s/{site_slug}/_contact` on the platform host, unauthenticated, form-encoded, body \u2264 16 KiB. It computes `ip_hash = sha256(client_ip \u2016 salt)` (the raw IP is never stored), makes ONE messenger send `SubmitContactFormRequest{host or site_slug, page_path, name, email, message, honeypot, ip_hash}`, then answers `303 See Other` back to the page with `?sent=1` (or `?error=\u2026`).
+A raw axum route on the api crate: `POST /_contact` on a custom domain and `POST /s/{site_slug}/_contact` on the platform host, unauthenticated, form-encoded, body ≤ 16 KiB. It computes `ip_hash = sha256(client_ip ‖ salt)` (the raw IP is never stored), makes ONE messenger send `SubmitContactFormRequest{host or site_slug, page_path, name, email, message, honeypot, ip_hash}`, then answers `303 See Other` back to the page with `?sent=1` (or `?error=…`).
 
-## Tables (Directive \u00a72)
+## Tables (Directive §2)
 
 ### `form_submission`
 | Column | Type | Notes |
@@ -18,9 +18,9 @@ A raw axum route on the api crate: `POST /_contact` on a custom domain and `POST
 | id | uuid PK | |
 | site_id | uuid | from `ResolvePublicSite`, never joined |
 | page_path | string | where it was sent from (informational; not validated against `content`) |
-| name | string | \u2264 200 chars |
-| email | string | syntactically valid, \u2264 320 chars |
-| message | string | \u2264 5000 chars |
+| name | string | ≤ 200 chars |
+| email | string | syntactically valid, ≤ 320 chars |
+| message | string | ≤ 5000 chars |
 | ip_hash | string | for abuse review only |
 | read_at | timestamp, nullable | |
 | created_at | timestamp | |
@@ -34,26 +34,26 @@ Index `(site_id, created_at)` for the inbox.
 | count | int32 | |
 | window_start | timestamp | |
 
-Accept rule, in the same transaction as the insert: `INSERT \u2026 ON CONFLICT (key) DO UPDATE SET count = count + 1 RETURNING count`; over **5 per hour per IP per site** \u2192 roll back, answer `rate_limited`. No advisory locks (\u00a77).
+Accept rule, in the same transaction as the insert: `INSERT … ON CONFLICT (key) DO UPDATE SET count = count + 1 RETURNING count`; over **5 per hour per IP per site** → roll back, answer `rate_limited`. No advisory locks (§7).
 
-## Handler flow \u2014 `SubmitContactFormRequest \u2192 FormSubmissionReceipt`
+## Handler flow — `SubmitContactFormRequest → FormSubmissionReceipt`
 
-1. Honeypot filled \u2192 answer `accepted` and store nothing (bots learn nothing).
-2. Validate lengths and email syntax \u2192 `invalid` with the field.
-3. Send `ResolvePublicSiteRequest{host | slug}` to `site` \u2014 remote I/O, outside any transaction (\u00a73.7). NotFound \u2192 `invalid`.
-4. One transaction: rate-limit upsert + insert submission \u2192 `accepted`.
+1. Honeypot filled → answer `accepted` and store nothing (bots learn nothing).
+2. Validate lengths and email syntax → `invalid` with the field.
+3. Send `ResolvePublicSiteRequest{host | slug}` to `site` — remote I/O, outside any transaction (§3.7). NotFound → `invalid`.
+4. One transaction: rate-limit upsert + insert submission → `accepted`.
 
 ## Editor inbox
 
-`ListFormSubmissionsRequest \u2192 FormSubmissionList` (site, unread filter, keyset paginated), `MarkFormSubmissionReadRequest \u2192 FormSubmission`, `DeleteFormSubmissionRequest \u2192 FormSubmission`. Each first sends `AuthorizeSiteAccessRequest` (min role `editor`) to `site`.
+`ListFormSubmissionsRequest → FormSubmissionList` (site, unread filter, keyset paginated), `MarkFormSubmissionReadRequest → FormSubmission`, `DeleteFormSubmissionRequest → FormSubmission`. Each first sends `AuthorizeSiteAccessRequest` (min role `editor`) to `site`.
 
 ## Schedule
 
-`purge_rate_limits`, every 1 h: a ticker worker (registered with `basable-app`, joined on shutdown) that deletes `form_rate_limit` rows with `window_start < now() - 2h`. Idempotent and safe on every replica at once (a plain `DELETE \u2026 WHERE`).
+`purge_rate_limits`, every 1 h: a ticker worker (registered with `basable-app`, joined on shutdown) that deletes `form_rate_limit` rows with `window_start < now() - 2h`. Idempotent and safe on every replica at once (a plain `DELETE … WHERE`).
 
 ## Later: email alert
 
-When the user supplies an email provider credential, `forms` gains one external call `send_submission_alert` with strategy `keyed_replay` (irreversible: an email), key = submission id, `replayWindow` from the provider's docs. Because the alert must survive crashes and retry, it would also justify a small lifecycle (an `alert` processing-object type per submission) \u2014 decided when the integration is added.
+When the user supplies an email provider credential, `forms` gains one external call `send_submission_alert` with strategy `keyed_replay` (irreversible: an email), key = submission id, `replayWindow` from the provider's docs. Because the alert must survive crashes and retry, it would also justify a small lifecycle (an `alert` processing-object type per submission) — decided when the integration is added.
 
 ## API
 
@@ -61,7 +61,7 @@ When the user supplies an email provider credential, `forms` gains one external 
 
 ## Directive sections that bind
 
-\u00a72 for both tables; \u00a77 for `ResolvePublicSite` and `AuthorizeSiteAccess`; \u00a73.7 for sends outside transactions; \u00a71 for the ticker; \u00a710 docs.
+§2 for both tables; §7 for `ResolvePublicSite` and `AuthorizeSiteAccess`; §3.7 for sends outside transactions; §1 for the ticker; §10 docs.
 
 ## Tests
 

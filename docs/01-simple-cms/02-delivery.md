@@ -1,24 +1,24 @@
-# 02 \u2014 Nanoservice: delivery
+# 02 — Nanoservice: delivery
 
-Renders the public website and editor previews. **Owns nothing**: no tables, no processing-object types, no config, no external effects \u2014 so no schema, no role and no pool (Directive \u00a79 makes a pool for it a compile error). The cheapest shape that fits (\u00a71): a stateless renderer over messenger requests.
+Renders the public website and editor previews. **Owns nothing**: no tables, no processing-object types, no config, no external effects — so no schema, no role and no pool (Directive §9 makes a pool for it a compile error). The cheapest shape that fits (§1): a stateless renderer over messenger requests.
 
-## `RenderPathRequest \u2192 RenderedDocument`
+## `RenderPathRequest → RenderedDocument`
 
-`{host, site_slug?, path}` \u2192 `{status_code, content_type, body, cache_control}`.
+`{host, site_slug?, path}` → `{status_code, content_type, body, cache_control}`.
 
-1. Send `ResolvePublicSiteRequest` to `site` \u2014 by `site_slug` on the platform host, else by `host`. NotFound \u2192 plain 404.
+1. Send `ResolvePublicSiteRequest` to `site` — by `site_slug` on the platform host, else by `host`. NotFound → plain 404.
 2. Normalise the path (lowercase, strip leading/trailing `/`, reject `..` and empty segments), then route it:
-   - `` (root) \u2192 page path `home`.
-   - `blog`, `blog?after=<cursor>` \u2192 `ListPublishedPagesRequest{mode: posts}`; `blog/tag/{tag}` \u2192 same with `tag`.
-   - `sitemap.xml` \u2192 `ListPublishedPagesRequest{mode: all}` (paged until done; a few hundred entries), absolute URLs on `canonical_base_url`, `lastmod` = `updated_at`.
-   - `robots.txt` \u2192 `User-agent: *`, `Allow: /`, `Sitemap: <canonical_base_url>/sitemap.xml`.
-   - anything else, any depth (`about/team`) \u2192 `GetPublishedPageRequest{site_id, path}` to `content`.
-   - unpublished / unknown \u2192 404 rendered inside the site's layout.
+   - empty (root) → page path `home`.
+   - `blog`, `blog?after=<cursor>` → `ListPublishedPagesRequest{mode: posts}`; `blog/tag/{tag}` → same with `tag`.
+   - `sitemap.xml` → `ListPublishedPagesRequest{mode: all}` (paged until done; a few hundred entries), absolute URLs on `canonical_base_url`, `lastmod` = `updated_at`.
+   - `robots.txt` → `User-agent: *`, `Allow: /`, `Sitemap: <canonical_base_url>/sitemap.xml`.
+   - anything else, any depth (`about/team`) → `GetPublishedPageRequest{site_id, path}` to `content`.
+   - unpublished / unknown → 404 rendered inside the site's layout.
 3. Render: each block to HTML with **all text escaped** and URLs restricted to `http(s):` or internal paths; a `contact_form` block becomes the plain POST form (see `02-forms.md`) with a thank-you or error notice from `?sent=1` / `?error=`; posts show date and tag links; `{{breadcrumbs}}` from the page's ancestors (unpublished ancestors shown unlinked). `{{head}}` gets `<title>`, `meta description`, `og:title`, `og:description`, `og:image`, `<link rel=canonical>` on `canonical_base_url`; `{{nav}}` marks the current page and its ancestors.
 
-All sends are remote I/O with no transaction held (\u00a73.7); read-only requests carry no generation (\u00a77).
+All sends are remote I/O with no transaction held (§3.7); read-only requests carry no generation (§7).
 
-## `PreviewPageRequest \u2192 RenderedDocument`
+## `PreviewPageRequest → RenderedDocument`
 
 `{page_id, revision_id?, identity_id}` (identity from the Kratos session in the api crate). Sends `GetPreviewPageRequest` to `content` (which authorizes against `site`), then `ResolvePublicSiteRequest{site_id}`, then renders exactly as above with `X-Robots-Tag: noindex` and `Cache-Control: no-store`. The admin UI shows it in a sandboxed `iframe srcdoc`.
 
@@ -35,7 +35,7 @@ Response `text/html` (or `application/xml`, `text/plain`) with `Cache-Control: p
 
 ## Directive sections that bind
 
-\u00a77 for every send; \u00a79 (no in-memory render cache in v1); \u00a710 docs.
+§7 for every send; §9 (no in-memory render cache in v1); §10 docs.
 
 ## Tests
 
