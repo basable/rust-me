@@ -1,28 +1,41 @@
-# 02 \u2014 Nanoservice: delivery
+# 02 — Nanoservice: delivery
 
-Renders the public website. **Owns nothing**: no tables, no processing-object types, no config, no external effects \u2014 so no schema, no role and no pool (Directive \u00a79 makes a pool for it a compile error). It is the cheapest shape that fits (\u00a71): a stateless renderer over two messenger requests.
+Renders the public website and editor previews. **Owns nothing**: no tables, no processing-object types, no config, no external effects — so no schema, no role and no pool (Directive §9 makes a pool for it a compile error). The cheapest shape that fits (§1): a stateless renderer over messenger requests.
 
-## Flow of `RenderPageRequest \u2192 RenderedPage`
+## `RenderPathRequest → RenderedDocument`
 
-`{site_slug, page_slug}` \u2192
-1. send `ResolvePublicSiteRequest{site_slug}` to `site` \u2192 `{site_id, name, layout_html, css, nav[]}`; NotFound \u2192 404.
-2. send `GetPublishedPageRequest{site_id, slug}` to `content` \u2192 `{title, body}`; NotFound or unpublished \u2192 404 rendered inside the site's layout.
-3. Render each block to HTML with **all text escaped** and URLs restricted to `http(s):` (no `javascript:`); substitute `{{site_name}}`, `{{title}}`, `{{nav}}`, `{{body}}`; inline the CSS.
+`{host, site_slug?, path}` → `{status_code, content_type, body, cache_control}`.
 
-Both sends are remote I/O with no transaction held (\u00a73.7). Response: `{status_code, html}`.
+1. Send `ResolvePublicSiteRequest` to `site` — by `site_slug` on the platform host, else by `host`. NotFound → plain 404.
+2. Route the path:
+   - `/` → page `home`; `/{slug}` → page or post: `GetPublishedPageRequest` to `content`.
+   - `/blog`, `/blog?after=<cursor>` → `ListPublishedPagesRequest{mode: posts}`; `/blog/tag/{tag}` → same with `tag`.
+   - `/sitemap.xml` → `ListPublishedPagesRequest{mode: all}` (paged until done; a few hundred entries), absolute URLs on `canonical_base_url`, `lastmod` = `updated_at`.
+   - `/robots.txt` → `User-agent: *`, `Allow: /`, `Sitemap: <canonical_base_url>/sitemap.xml`.
+   - unpublished / unknown → 404 rendered inside the site's layout.
+3. Render: each block to HTML with **all text escaped** and URLs restricted to `http(s):`; a `contact_form` block becomes the plain POST form (see `02-forms.md`), showing a thank-you or error notice from `?sent=1` / `?error=`; posts show date and tag links. `{{head}}` gets `<title>`, `meta description`, `og:title`, `og:description`, `og:image`, and `<link rel=canonical>` on `canonical_base_url`; `{{nav}}` marks the current page.
 
-## Public route
+All sends are remote I/O with no transaction held (§3.7); read-only requests carry no generation (§7).
 
-A raw axum route on the api crate beside the Connect router: `GET /s/{site_slug}/` (page slug `home`) and `GET /s/{site_slug}/{page_slug}`, unauthenticated, makes ONE messenger send (`RenderPageRequest`) and writes `text/html` with `Cache-Control: public, max-age=60`. The HTTPRoute must send `/s/*` to the binary (deviation, `05-deployment.md`). Not a manifest `webhook` (no signature): the implementing session adds the route by hand in the api crate.
+## `PreviewPageRequest → RenderedDocument`
+
+`{page_id, revision_id?, identity_id}` (identity from the Kratos session in the api crate). Sends `GetPreviewPageRequest` to `content` (which authorizes against `site`), then `ResolvePublicSiteRequest{site_id}`, then renders exactly as above with `X-Robots-Tag: noindex` and `Cache-Control: no-store`. The admin UI shows it in a sandboxed `iframe srcdoc`.
+
+## Public routes (raw routes on the api crate, one messenger send each)
+
+- Platform host: `GET /s/{site_slug}/` and `GET /s/{site_slug}/{*path}`.
+- Custom domain (any host that is not the platform host): `GET /{*path}`.
+
+Response `text/html` (or `application/xml`, `text/plain`) with `Cache-Control: public, max-age=60`. These are not manifest `webhooks` (no signature): the implementing session adds them by hand in the api crate, next to the forms POST route.
 
 ## API
 
-`PublicService.RenderPage` \u2014 the same request, for the admin UI's "view live" frame.
+`PublicService`: `RenderPath` (the admin's "view live"), `PreviewPage`.
 
 ## Directive sections that bind
 
-\u00a77 for both sends (no generation needed: read-only requests carry no derived intent); \u00a79 for "no in-memory state" (no render cache in v1); \u00a710 docs.
+§7 for every send; §9 (no in-memory render cache in v1); §10 docs.
 
 ## Tests
 
-Unit: block rendering and escaping (script tags, `javascript:` URLs), template substitution, nav rendering with the current page marked. Integration: with site and content registered, a published page renders; an unpublished page 404s; an unknown site 404s; a draft saved after publishing does not show.
+Unit: block rendering and escaping (`<script>`, `javascript:` URLs), head/meta generation, sitemap XML, robots, path routing table, nav current-page marking. Integration (all four nanoservices registered): published page renders; unpublished 404s; unknown site 404s; a draft saved after publishing does not show but does in preview; preview by a non-member is denied; blog index pages and tag filter; sitemap lists only live pages with canonical URLs.

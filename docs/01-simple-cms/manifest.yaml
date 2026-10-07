@@ -7,8 +7,21 @@ project:
   database: { instances: 1 }
 nanoservices:
   - name: site
-    description: Owns websites, their members and roles, navigation, and the theme catalog.
+    description: Owns websites, members and roles, navigation, custom domains, and the theme catalog.
     owns:
+      processingObjects:
+        - name: domain
+          prefix: dom
+          spec:
+            - { name: site_id, type: uuid, immutable: true }
+            - { name: hostname, type: string, immutable: true }
+            - { name: verification_token, type: string, immutable: true }
+          status:
+            - { name: phase, type: string }
+            - { name: verified_at, type: timestamp, nullable: true }
+            - { name: last_checked_at, type: timestamp, nullable: true }
+            - { name: consecutive_misses, type: int32 }
+            - { name: last_error, type: string, nullable: true }
       tables:
         - name: site
           columns:
@@ -48,6 +61,10 @@ nanoservices:
       - { message: RemoveSiteMemberRequest, response: SiteMember }
       - { message: ListSiteMembersRequest, response: SiteMemberList }
       - { message: SaveNavigationRequest, response: Navigation }
+      - { message: AddDomainRequest, response: Domain }
+      - { message: RemoveDomainRequest, response: Domain }
+      - { message: ListDomainsRequest, response: DomainList }
+      - { message: VerifyDomainRequest, response: Domain }
       - { message: AuthorizeSiteAccessRequest, response: SiteAccess }
       - { message: ResolvePublicSiteRequest, response: PublicSite }
     api:
@@ -61,9 +78,13 @@ nanoservices:
         - { name: RemoveSiteMember, request: RemoveSiteMemberRequest, response: RemoveSiteMemberResponse }
         - { name: ListSiteMembers, request: ListSiteMembersRequest, response: ListSiteMembersResponse }
         - { name: SaveNavigation, request: SaveNavigationRequest, response: SaveNavigationResponse }
+        - { name: AddDomain, request: AddDomainRequest, response: AddDomainResponse }
+        - { name: RemoveDomain, request: RemoveDomainRequest, response: RemoveDomainResponse }
+        - { name: ListDomains, request: ListDomainsRequest, response: ListDomainsResponse }
+        - { name: VerifyDomain, request: VerifyDomainRequest, response: VerifyDomainResponse }
 
   - name: content
-    description: Owns pages, revisions, the live pointer, and scheduled publications.
+    description: Owns pages and posts, their revisions, the live pointer, and scheduled publications.
     owns:
       processingObjects:
         - name: publication
@@ -81,17 +102,21 @@ nanoservices:
           columns:
             - { name: id, type: uuid, primaryKey: true }
             - { name: site_id, type: uuid }
+            - { name: kind, type: string }
             - { name: slug, type: string }
-            - { name: title, type: string }
             - { name: created_at, type: timestamp }
             - { name: updated_at, type: timestamp }
-          indexes: [ { columns: [site_id, slug] } ]
+          indexes: [ { columns: [site_id, slug] }, { columns: [site_id, kind] } ]
         - name: page_revision
           columns:
             - { name: id, type: uuid, primaryKey: true }
             - { name: page_id, type: uuid }
             - { name: title, type: string }
             - { name: body, type: json }
+            - { name: meta_description, type: string, nullable: true }
+            - { name: social_image_url, type: string, nullable: true }
+            - { name: post_date, type: timestamp, nullable: true }
+            - { name: tags, type: json }
             - { name: author_id, type: uuid }
             - { name: created_at, type: timestamp }
           indexes: [ { columns: [page_id, created_at] } ]
@@ -101,6 +126,7 @@ nanoservices:
             - { name: revision_id, type: uuid, nullable: true }
             - { name: set_at, type: timestamp }
             - { name: set_by_publication_id, type: uuid, nullable: true }
+            - { name: first_published_at, type: timestamp, nullable: true }
     handles:
       - { message: CreatePageRequest, response: Page }
       - { message: SavePageRequest, response: Page }
@@ -114,6 +140,8 @@ nanoservices:
       - { message: CancelPublicationRequest, response: Publication }
       - { message: ListPublicationsRequest, response: PublicationList }
       - { message: GetPublishedPageRequest, response: PublishedPage }
+      - { message: ListPublishedPagesRequest, response: PublishedPageIndex }
+      - { message: GetPreviewPageRequest, response: PublishedPage }
     sends:
       - { message: AuthorizeSiteAccessRequest, response: SiteAccess }
     api:
@@ -131,14 +159,57 @@ nanoservices:
         - { name: CancelPublication, request: CancelPublicationRequest, response: CancelPublicationResponse }
         - { name: ListPublications, request: ListPublicationsRequest, response: ListPublicationsResponse }
 
-  - name: delivery
-    description: Renders published pages of a site to public HTML with its theme; owns no state.
+  - name: forms
+    description: Owns contact-form submissions from visitors, their rate limits, and the editor inbox.
+    owns:
+      tables:
+        - name: form_submission
+          columns:
+            - { name: id, type: uuid, primaryKey: true }
+            - { name: site_id, type: uuid }
+            - { name: page_slug, type: string }
+            - { name: name, type: string }
+            - { name: email, type: string }
+            - { name: message, type: string }
+            - { name: ip_hash, type: string }
+            - { name: read_at, type: timestamp, nullable: true }
+            - { name: created_at, type: timestamp }
+          indexes: [ { columns: [site_id, created_at] } ]
+        - name: form_rate_limit
+          columns:
+            - { name: key, type: string, primaryKey: true }
+            - { name: count, type: int32 }
+            - { name: window_start, type: timestamp }
+          indexes: [ { columns: [window_start] } ]
+    schedules:
+      - { name: purge_rate_limits, every: 1h }
     handles:
-      - { message: RenderPageRequest, response: RenderedPage }
+      - { message: SubmitContactFormRequest, response: FormSubmissionReceipt }
+      - { message: ListFormSubmissionsRequest, response: FormSubmissionList }
+      - { message: MarkFormSubmissionReadRequest, response: FormSubmission }
+      - { message: DeleteFormSubmissionRequest, response: FormSubmission }
+    sends:
+      - { message: ResolvePublicSiteRequest, response: PublicSite }
+      - { message: AuthorizeSiteAccessRequest, response: SiteAccess }
+    api:
+      service: FormsService
+      methods:
+        - { name: ListFormSubmissions, request: ListFormSubmissionsRequest, response: ListFormSubmissionsResponse }
+        - { name: MarkFormSubmissionRead, request: MarkFormSubmissionReadRequest, response: MarkFormSubmissionReadResponse }
+        - { name: DeleteFormSubmission, request: DeleteFormSubmissionRequest, response: DeleteFormSubmissionResponse }
+
+  - name: delivery
+    description: Renders public pages, blog index, sitemap and editor previews with the site theme; owns no state.
+    handles:
+      - { message: RenderPathRequest, response: RenderedDocument }
+      - { message: PreviewPageRequest, response: RenderedDocument }
     sends:
       - { message: ResolvePublicSiteRequest, response: PublicSite }
       - { message: GetPublishedPageRequest, response: PublishedPage }
+      - { message: ListPublishedPagesRequest, response: PublishedPageIndex }
+      - { message: GetPreviewPageRequest, response: PublishedPage }
     api:
       service: PublicService
       methods:
-        - { name: RenderPage, request: RenderPageRequest, response: RenderPageResponse }
+        - { name: RenderPath, request: RenderPathRequest, response: RenderPathResponse }
+        - { name: PreviewPage, request: PreviewPageRequest, response: PreviewPageResponse }
